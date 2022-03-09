@@ -194,6 +194,8 @@ elseif( CATKIN_DEVEL_PREFIX OR CATKIN_BUILD_BINARY_PACKAGE )
   dai_add_node(rgb_subscriber_node ros1_src/rgb_video_subscriber.cpp)
   # dai_add_node(stereo_mimic_node ros1_src/stereo_mimic_node.cpp)
   dai_add_node(stereo_inertial_node ros1_src/stereo_inertial_publisher.cpp)
+  dai_add_node(custom_rgb_node ros1_src/custom_rgb_publisher.cpp)
+  dai_add_node(left_mono_node ros1_src/left_mono_publisher.cpp)
 
   dai_add_node(stereo_node ros1_src/stereo_publisher.cpp)
   dai_add_node(yolov4_spatial_node ros1_src/yolov4_spatial_publisher.cpp)
@@ -213,6 +215,8 @@ elseif( CATKIN_DEVEL_PREFIX OR CATKIN_BUILD_BINARY_PACKAGE )
           # stereo_mimic_node
           stereo_inertial_node
           stereo_node
+          left_mono_node
+          custom_rgb_node
           yolov4_spatial_node
           RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
   )
