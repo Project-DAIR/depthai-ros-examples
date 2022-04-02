@@ -16,7 +16,7 @@
 #include <depthai_bridge/DisparityConverter.hpp>
 
 
-std::tuple<dai::Pipeline, int, int> createPipeline(std::string resolution, float fps){
+std::tuple<dai::Pipeline, int, int> createPipeline(std::string resolution, float fps, uint32_t exposureTimeUs, uint32_t sensitivityIso){
     dai::Pipeline pipeline;
     dai::node::MonoCamera::Properties::SensorResolution monoResolution; 
     auto monoLeft    = pipeline.create<dai::node::MonoCamera>();
@@ -51,6 +51,9 @@ std::tuple<dai::Pipeline, int, int> createPipeline(std::string resolution, float
     monoLeft->setResolution(monoResolution);
     monoLeft->setFps(fps);
     monoLeft->setBoardSocket(dai::CameraBoardSocket::LEFT);
+    
+    // monoLeft->initialControl.setManualExposure(1500, 100);
+    monoLeft->initialControl.setManualExposure(exposureTimeUs, sensitivityIso);
 
     monoLeft->out.link(xoutLeft->input);
 
@@ -71,6 +74,8 @@ int main(int argc, char** argv){
     int LRchecktresh = 5;
     std::string monoResolution = "720p";
     float fps = 60.0;
+    int32_t exposureTimeUs = 1500;
+    int32_t sensitivityIso = 100;
 
     dai::Pipeline pipeline;
 
@@ -78,6 +83,8 @@ int main(int argc, char** argv){
     badParams += !pnh.getParam("tf_prefix",        tfPrefix);
     badParams += !pnh.getParam("monoResolution",   monoResolution);
     badParams += !pnh.getParam("fps",              fps);
+    badParams += !pnh.getParam("exposureTimeUs",   exposureTimeUs);
+    badParams += !pnh.getParam("sensitivityIso",   sensitivityIso);
 
     if (badParams > 0)
     {   
@@ -85,7 +92,7 @@ int main(int argc, char** argv){
         throw std::runtime_error("Couldn't find %d of the parameters");
     }
 
-    std::tie(pipeline, monoWidth, monoHeight) = createPipeline(monoResolution, fps);
+    std::tie(pipeline, monoWidth, monoHeight) = createPipeline(monoResolution, fps, exposureTimeUs, sensitivityIso);
 
     dai::Device device(pipeline);
     auto leftQueue = device.getOutputQueue("left", 30, false);
