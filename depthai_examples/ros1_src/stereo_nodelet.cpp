@@ -35,6 +35,9 @@ namespace depthai_examples{
             bool lrcheck, extended, subpixel, enableDepth;
             int confidence = 200;
             int LRchecktresh = 5;
+            float fps = 60.0;
+            int32_t exposureTimeUs = 1500;
+            int32_t sensitivityIso = 100;
 
             badParams += !pnh.getParam("tf_prefix", tfPrefix);
             badParams += !pnh.getParam("camera_param_uri", cameraParamUri);
@@ -45,6 +48,9 @@ namespace depthai_examples{
             badParams += !pnh.getParam("confidence",  confidence);
             badParams += !pnh.getParam("LRchecktresh",  LRchecktresh);
             badParams += !pnh.getParam("monoResolution",  monoResolution);
+            badParams += !pnh.getParam("fps",              fps);
+            badParams += !pnh.getParam("exposureTimeUs",   exposureTimeUs);
+            badParams += !pnh.getParam("sensitivityIso",   sensitivityIso);
             
             if (badParams > 0)
             {   
@@ -52,27 +58,15 @@ namespace depthai_examples{
                 throw std::runtime_error("Couldn't find %d of the parameters");
             }
 
-            if(mode == "depth"){
-                enableDepth = true;
-            }
-            else{
-                enableDepth = false;
-            }
+            enableDepth = false;
 
             dai::Pipeline pipeline;
             int monoWidth, monoHeight;
-            std::tie(pipeline, monoWidth, monoHeight) = createPipeline(enableDepth, lrcheck, extended, subpixel, confidence, LRchecktresh, monoResolution);
+            std::tie(pipeline, monoWidth, monoHeight) = createPipeline(enableDepth, lrcheck, extended, subpixel, confidence, LRchecktresh, monoResolution, fps, exposureTimeUs, sensitivityIso);
             _dev = std::make_unique<dai::Device>(pipeline);
 
             auto leftQueue = _dev->getOutputQueue("left", 30, false);
-            auto rightQueue = _dev->getOutputQueue("right", 30, false);
 
-            std::shared_ptr<dai::DataOutputQueue> stereoQueue;
-            if (enableDepth) {
-                stereoQueue = _dev->getOutputQueue("depth", 30, false);
-            }else{
-                stereoQueue = _dev->getOutputQueue("disparity", 30, false);
-            }
             auto calibrationHandler = _dev->readCalibration();
 
             // this part would be removed once we have calibration-api
@@ -85,10 +79,6 @@ namespace depthai_examples{
             */
 
             auto boardName = calibrationHandler.getEepromData().boardName;
-            if (monoHeight > 480 && boardName == "OAK-D-LITE") {
-                monoWidth = 640;
-                monoHeight = 480;
-            }
 
             leftConverter = std::make_unique<dai::rosBridge::ImageConverter>(tfPrefix + "_left_camera_optical_frame", true);
             auto leftCameraInfo = leftConverter->calibrationToCameraInfo(calibrationHandler, dai::CameraBoardSocket::LEFT, monoWidth, monoHeight); 
@@ -107,65 +97,17 @@ namespace depthai_examples{
 
             // bridgePublish.startPublisherThread();
             leftPublish->addPublisherCallback();
-
-            rightConverter = std::make_unique<dai::rosBridge::ImageConverter >(tfPrefix + "_right_camera_optical_frame", true);
-            auto rightCameraInfo = rightConverter->calibrationToCameraInfo(calibrationHandler, dai::CameraBoardSocket::RIGHT, monoWidth, monoHeight); 
-
-            rightPublish = std::make_unique<dai::rosBridge::BridgePublisher<sensor_msgs::Image, dai::ImgFrame>>
-                                                                                            (rightQueue,
-                                                                                             pnh, 
-                                                                                             std::string("right/image"),
-                                                                                             std::bind(&dai::rosBridge::ImageConverter::toRosMsg, 
-                                                                                             rightConverter.get(), 
-                                                                                             std::placeholders::_1, 
-                                                                                             std::placeholders::_2) , 
-                                                                                             30,
-                                                                                             rightCameraInfo,
-                                                                                             "right");
-
-            rightPublish->addPublisherCallback();
-
-            // dai::rosBridge::ImageConverter depthConverter(tfPrefix + "_right_camera_optical_frame");
-            depthPublish = std::make_unique<dai::rosBridge::BridgePublisher<sensor_msgs::Image, dai::ImgFrame>>
-                                                                            (stereoQueue,
-                                                                             pnh, 
-                                                                             std::string("stereo/depth"),
-                                                                             std::bind(&dai::rosBridge::ImageConverter::toRosMsg, 
-                                                                             rightConverter.get(), // since the converter has the same frame name
-                                                                                             // and image type is also same we can reuse it
-                                                                             std::placeholders::_1, 
-                                                                             std::placeholders::_2) , 
-                                                                             30,
-                                                                             rightCameraInfo,
-                                                                             "stereo");
-
-            depthPublish->addPublisherCallback();
-
-            // We can add the rectified frames also similar to these publishers. 
-            // Left them out so that users can play with it by adding and removing
         }
 
 
-    std::tuple<dai::Pipeline, int, int> createPipeline(bool withDepth, bool lrcheck, bool extended, bool subpixel, int confidence, int LRchecktresh, std::string resolution){
+    std::tuple<dai::Pipeline, int, int> createPipeline(bool withDepth, bool lrcheck, bool extended, bool subpixel, int confidence, int LRchecktresh, std::string resolution, float fps, uint32_t exposureTimeUs, uint32_t sensitivityIso){
         dai::Pipeline pipeline;
 
         auto monoLeft    = pipeline.create<dai::node::MonoCamera>();
-        auto monoRight   = pipeline.create<dai::node::MonoCamera>();
         auto xoutLeft    = pipeline.create<dai::node::XLinkOut>();
-        auto xoutRight   = pipeline.create<dai::node::XLinkOut>();
-        auto stereo      = pipeline.create<dai::node::StereoDepth>();
-        auto xoutDepth   = pipeline.create<dai::node::XLinkOut>();
 
         // XLinkOut
         xoutLeft->setStreamName("left");
-        xoutRight->setStreamName("right");
-
-        if (withDepth) {
-            xoutDepth->setStreamName("depth");
-        }
-        else {
-            xoutDepth->setStreamName("disparity");
-        }
 
         int width, height;
         dai::node::MonoCamera::Properties::SensorResolution monoResolution;
@@ -193,35 +135,11 @@ namespace depthai_examples{
         // MonoCamera
         monoLeft->setResolution(monoResolution);
         monoLeft->setBoardSocket(dai::CameraBoardSocket::LEFT);
-        monoRight->setResolution(monoResolution);
-        monoRight->setBoardSocket(dai::CameraBoardSocket::RIGHT);
+        monoLeft->setFps(fps);
 
-        // int maxDisp = 96;
-        // if (extended) maxDisp *= 2;
-        // if (subpixel) maxDisp *= 32; // 5 bits fractional disparity
+        monoLeft->initialControl.setManualExposure(exposureTimeUs, sensitivityIso);
 
-        // StereoDepth
-        stereo->initialConfig.setConfidenceThreshold(confidence);
-        stereo->initialConfig.setLeftRightCheckThreshold(LRchecktresh);
-        stereo->setRectifyEdgeFillColor(0); // black, to better see the cutout
-
-        stereo->setLeftRightCheck(lrcheck);
-        stereo->setExtendedDisparity(extended);
-        stereo->setSubpixel(subpixel);
-
-        // Link plugins CAM -> STEREO -> XLINK
-        monoLeft->out.link(stereo->left);
-        monoRight->out.link(stereo->right);
-
-        stereo->syncedLeft.link(xoutLeft->input);
-        stereo->syncedRight.link(xoutRight->input);
-
-        if(withDepth){
-            stereo->depth.link(xoutDepth->input);
-        }
-        else{
-            stereo->disparity.link(xoutDepth->input);
-        }
+        monoLeft->out.link(xoutLeft->input);
 
         return std::make_tuple(pipeline, width, height);
     }
